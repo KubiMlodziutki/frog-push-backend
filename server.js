@@ -1,37 +1,53 @@
-const webpush = require('web-push');
 const express = require('express');
+const cors = require('cors');
+const webpush = require('web-push');
 const bodyParser = require('body-parser');
+require('dotenv').config();
 
 const app = express();
+app.use(cors());
 app.use(bodyParser.json());
 
-const vapidKeys = webpush.generateVAPIDKeys();
-console.log(vapidKeys);
-
 webpush.setVapidDetails(
-  'mailto:you@example.com',
-  vapidKeys.publicKey,
-  vapidKeys.privateKey
+  'mailto:your@email.com',
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
 );
 
 let subscriptions = [];
 
 app.post('/subscribe', (req, res) => {
-  subscriptions.push(req.body);
-  res.status(201).json({});
+  const newSub = req.body;
+
+  subscriptions = subscriptions.filter(sub => sub.endpoint !== newSub.endpoint);
+
+  subscriptions.push(newSub);
+  console.log('[SUBSCRIBED]', newSub.endpoint);
+  res.status(201).json({ message: 'Subscribed' });
 });
 
 app.post('/send', async (req, res) => {
   const payload = JSON.stringify({
     title: 'Froglert',
-    body: 'Tap to check whether frogs are okay 🐸'
+    body: 'Ayo, new frog just dropped! 🐸',
+    icon: 'images/icon-192.png'
   });
 
   const results = await Promise.allSettled(
-    subscriptions.map(sub => webpush.sendNotification(sub, payload))
+    subscriptions.map(sub =>
+      webpush.sendNotification(sub, payload).catch(err => {
+        console.error('[ERROR]', err.statusCode, err.body);
+
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          console.warn('[UNSUBSCRIBED]', sub.endpoint);
+          subscriptions = subscriptions.filter(s => s.endpoint !== sub.endpoint);
+        }
+      })
+    )
   );
 
-  res.json(results);
+  res.json({ message: 'Notifications attempted', results });
 });
 
-app.listen(3000, () => console.log('Push server running on port 3000'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`🚀 Server listening on port ${PORT}`));
